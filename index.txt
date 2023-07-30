@@ -1,0 +1,8 @@
+const { input, outputFormat } = require('./examples/example4-custom');
+const { formatObject } = require('./objectFormat');
+const filterConfig = { // it is set to false if we need to add some extra property to the existing input object
+    filter: true
+}
+
+const output = formatObject(input, outputFormat, filterConfig)
+console.log(JSON.stringify(output))

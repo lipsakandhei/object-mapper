@@ -1,0 +1,151 @@
+const { isObject } = require('lodash')
+const logger = require('../logger')
+
+const objectPath = require('object-path')
+/*
+    input: <array | object>, the input object or array of objects that needs to be transformed
+    outputInputKeyMapping: <object>,
+        keys : the actual path in the input object, value: the path to which the input key is to be transformed
+        value : the value can be of following three types: 1) object, 2) array, 3) string to handle the cases of 1) extracting value via a custom callback, 2) extracting value from a provided default value and 3) extracting value from a given object path. The the detailed descriptions of the inputType are provided below:
+        1) object: The object should have two parameters
+            args: <array>, It should contains all the object paths which are to be processed by the callback function
+            skipValidation: It will skip the validation step
+            callback: <function>, The callback function to which should return a value
+            Example 1 :
+            {
+                args: ['fullName'],
+                callback: (args) => {
+                    if (args[0]) return args[0].split(' ')[0];
+                }
+            }
+            Example 2:
+            {
+                args: ['addressLine1', 'addressLine2', 'addressLine3'],
+                callback: (args) => {
+                    return `${args[0]}\n ${args[1]}\n ${args[2]}\n`;
+                }
+            }
+        2) array: There following two cases:
+            1) array has length one: Then first value is taken as the default value
+
+            2) array has length two: Then first value is considered as the object path and the second value is taken as the default value
+        3) string: The value is simply extracted from the string oject path.
+
+    options:
+        filter: (default false) filters out other fields not present in the outputInputKeyMapping
+        callbackArgumentValidation(Array): { isValid: boolean, defaultAction: function} : (default extractValueViaCustomCallback)
+*/
+exports.formatObject = (input, outputInputKeyMapping, options = {}) => {
+  if (Array.isArray(input)) {
+    const outputArray = []
+    for (const inputObject of input) {
+      const outputObject = transformObject(inputObject, outputInputKeyMapping, options)
+      outputArray.push(outputObject)
+    }
+    return outputArray
+  } else {
+    return transformObject(input, outputInputKeyMapping, options)
+  }
+}
+
+const transformObject = (inputObject, outputInputKeyMapping, options = {}) => {
+  validateTransformObjectParameters({ inputObject, outputInputKeyMapping })
+  let outputObject = {}
+
+  // TODO: Support Multiple Middlewares
+  const { filter } = options
+
+  if (!filter) {
+    outputObject = { ...inputObject }
+  }
+
+  for (const [outputPath, inputPath] of Object.entries(outputInputKeyMapping)) {
+    // filtering out undefined keys
+    if (!inputPath) continue
+    let value
+    if (Array.isArray(inputPath)) {
+      value = extractValueFromDefaultValue(inputObject, inputPath)
+    } else if (isObject(inputPath)) {
+      value = extractValueViaCustomCallback(inputObject, inputPath, options)
+    } else if (typeof inputPath === 'string') {
+      value = extractValue(inputObject, inputPath)
+    } else {
+      logger.warn(`Provided inputPath = ${inputPath} is not valid.`)
+      continue
+    }
+
+    objectPath.set(outputObject, outputPath, value)
+    if (!Object.keys(outputInputKeyMapping).includes(inputPath)) {
+      objectPath.del(outputObject, inputPath)
+    }
+  }
+
+  return outputObject
+}
+
+const validateTransformObjectParameters = (transformObjectParameters) => {
+  for (const [key, value] of Object.entries(transformObjectParameters)) {
+    isValidObject(value, key)
+  }
+}
+
+const isValidObject = (input, inputName = 'object') => {
+  if (!(input instanceof Object) || Array.isArray(input)) {
+    throw new Error(`The ${inputName} needs to be of type object`)
+  }
+}
+
+const extractedValuesValidation = function (extractedValues) {
+  let extractedValuesPresent = false
+  for (const extractedValue of extractedValues) {
+    if (extractedValue !== undefined) {
+      extractedValuesPresent = true
+      break
+    }
+  }
+  return {
+    validArgument: extractedValuesPresent,
+    defaultAction: (extractedValues) => { }
+  }
+}
+
+const extractValueViaCustomCallback = (inputObject, inputPath, options) => {
+  const { callbackArgumentValidation = extractedValuesValidation } = options
+
+  if (!isValidInputObject(inputPath)) return
+  const { args, callback, skipValidation } = inputPath
+  const extractedValues = args.map(key => extractValue(inputObject, key))
+
+  const { validArgument, defaultAction } = callbackArgumentValidation(extractedValues)
+  if (validArgument || skipValidation) return callback(extractedValues)
+  else defaultAction(extractedValues)
+}
+
+const extractValueFromDefaultValue = (inputObject, inputPath) => {
+  if (inputPath.length === 1) return inputPath[0] // static value
+  if (inputPath.length === 2) return extractValue(inputObject, inputPath[0], inputPath[1]) // extract the value from the key or assing the default value
+}
+
+const extractValue = (object, key, defaultValue) => {
+  return objectPath.get(object, key, defaultValue)
+}
+
+const isValidInputObject = (inputObject) => {
+  const { args, callback } = inputObject
+  if (!args || !callback) {
+    logger.warn(`Either args = ${args} or callback = ${callback} is not valid.`)
+    return false
+  }
+
+  if (!Array.isArray(args)) {
+    logger.warn(`args = ${args} should be an array.`)
+    return false
+  }
+
+  if (!(callback instanceof Function)) {
+    logger.warn(`callback = ${callback} should be a function.`)
+    return false
+  }
+
+  return true
+}

@@ -1,0 +1,33 @@
+const httpContext = require('express-http-context')
+const logger = require('pino')
+const config = require('./config.json')
+const configurableLoggerOptions = config.logger
+const loggerParent = logger({
+  ...configurableLoggerOptions
+})
+
+loggerParent.error = function () {
+  loggerParent.child({
+    'x-correlation-id': httpContext.get('x-correlation-id')
+  }).error(...arguments)
+}
+
+loggerParent.warn = function () {
+  loggerParent.child({
+    'x-correlation-id': httpContext.get('x-correlation-id')
+  }).warn(...arguments)
+}
+
+loggerParent.info = function () {
+  loggerParent.child({
+    'x-correlation-id': httpContext.get('x-correlation-id')
+  }).info(...arguments)
+}
+
+loggerParent.debug = function () {
+  loggerParent.child({
+    'x-correlation-id': httpContext.get('x-correlation-id')
+  }).debug(...arguments)
+}
+
+module.exports = loggerParent
